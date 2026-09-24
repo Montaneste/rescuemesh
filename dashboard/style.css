@@ -469,3 +469,9 @@ footer strong {
     text-align: center;
   }
 }
+
+.ack.blocked {
+  color: #ff4964;
+  border-color: rgba(255, 73, 100, 0.35);
+  background: rgba(255, 73, 100, 0.08);
+}

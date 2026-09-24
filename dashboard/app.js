@@ -66,24 +66,46 @@ function handleDashboardEvent(data) {
   switch (data.type) {
 
     case "incident":
-      showIncident(data.payload);
+      showIncident(
+        data.payload
+      );
       break;
 
     case "decision":
-      showDecision(data.payload);
+      showDecision(
+        data.payload
+      );
       break;
 
     case "safety":
-      showSafety(data.payload);
+      showSafety(
+        data.payload
+      );
       break;
 
     case "actuation":
-      showActuation(data.payload);
+      showActuation(
+        data.payload
+      );
       break;
 
     case "ack":
-      showAcknowledgement(data.payload);
+      showAcknowledgement(
+        data.payload
+      );
       break;
+
+    case "error":
+      showError(
+        data.payload
+      );
+      break;
+
+    default:
+      console.warn(
+        "[DASHBOARD] Unknown event type:",
+        data.type
+      );
   }
 }
 
@@ -98,20 +120,24 @@ function showIncident(event) {
     "step-detect"
   );
 
+
   document.getElementById(
     "incident-title"
   ).textContent =
     "Water leak detected";
+
 
   document.getElementById(
     "severity-badge"
   ).textContent =
     "INCIDENT";
 
+
   document.getElementById(
     "severity-badge"
   ).className =
     "badge critical";
+
 
   document.getElementById(
     "water-value"
@@ -120,10 +146,12 @@ function showIncident(event) {
       ? "YES"
       : "NO";
 
+
   document.getElementById(
     "flow-value"
   ).textContent =
     `${event.flow} L/min`;
+
 
   document.getElementById(
     "occupancy-value"
@@ -132,12 +160,34 @@ function showIncident(event) {
       event.occupancy
     ).toUpperCase();
 
+
   document.getElementById(
     "timestamp-value"
   ).textContent =
     new Date(
       event.timestamp
     ).toLocaleTimeString();
+
+
+  // Reset physical-response area whenever
+  // a new incident begins.
+
+  document.getElementById(
+    "valve-state"
+  ).textContent =
+    "—";
+
+
+  document.getElementById(
+    "ack-state"
+  ).textContent =
+    "Waiting for safety validation";
+
+
+  document.getElementById(
+    "ack-state"
+  ).className =
+    "ack waiting";
 }
 
 
@@ -151,19 +201,27 @@ function showDecision(decision) {
     "step-ai"
   );
 
+
+  const isLive =
+    decision.source === "jev" ||
+    decision.source === "jev-live";
+
+
   document.getElementById(
     "jev-mode"
   ).textContent =
-    decision.source === "jev"
+    isLive
       ? "JEV LIVE"
       : "JEV MOCK";
+
 
   document.getElementById(
     "footer-ai"
   ).textContent =
-    decision.source === "jev"
+    isLive
       ? "JEV LIVE"
       : "JEV MOCK";
+
 
   document.getElementById(
     "jev-action"
@@ -172,24 +230,34 @@ function showDecision(decision) {
       decision.action
     );
 
+
   document.getElementById(
     "confidence-value"
   ).textContent =
-    `${Math.round(
-      decision.confidence * 100
-    )}%`;
+    Number.isFinite(
+      decision.confidence
+    )
+      ? `${Math.round(
+          decision.confidence * 100
+        )}%`
+      : "—";
+
 
   document.getElementById(
     "jev-severity"
   ).textContent =
-    String(
-      decision.severity
-    ).toUpperCase();
+    decision.severity
+      ? String(
+          decision.severity
+        ).toUpperCase()
+      : "—";
+
 
   document.getElementById(
     "reason-value"
   ).textContent =
-    decision.reason;
+    decision.reason ||
+    "No reasoning provided.";
 }
 
 
@@ -203,12 +271,15 @@ function showSafety(result) {
     "step-safety"
   );
 
+
   const container =
     document.getElementById(
       "safety-checks"
     );
 
-  container.innerHTML = "";
+
+  container.innerHTML =
+    "";
 
 
   for (
@@ -220,13 +291,16 @@ function showSafety(result) {
         "div"
       );
 
+
     element.className =
       check.passed
         ? "check pass"
         : "check fail";
 
+
     element.textContent =
       `${check.passed ? "✓" : "✗"} ${check.name}`;
+
 
     container.appendChild(
       element
@@ -239,39 +313,84 @@ function showSafety(result) {
       "safety-badge"
     );
 
+
   const resultElement =
     document.getElementById(
       "safety-result"
     );
 
 
-  if (result.approved) {
+  if (
+    result.approved
+  ) {
 
     badge.textContent =
       "APPROVED";
 
+
     badge.className =
       "badge approved";
+
 
     resultElement.textContent =
       "✓ DECISION APPROVED";
 
+
     resultElement.className =
       "decision approved";
+
+
+    document.getElementById(
+      "ack-state"
+    ).textContent =
+      "Safety approved — awaiting actuation";
+
+
+    document.getElementById(
+      "ack-state"
+    ).className =
+      "ack waiting";
 
   } else {
 
     badge.textContent =
       "BLOCKED";
 
+
     badge.className =
       "badge blocked";
+
 
     resultElement.textContent =
       "✗ DECISION BLOCKED";
 
+
     resultElement.className =
       "decision blocked";
+
+
+    // Pipeline intentionally stops at VALIDATE.
+    activateStep(
+      "step-safety"
+    );
+
+
+    document.getElementById(
+      "valve-state"
+    ).textContent =
+      "NO ACTION";
+
+
+    document.getElementById(
+      "ack-state"
+    ).textContent =
+      "✗ Command blocked by RescueMesh Safety Policy";
+
+
+    document.getElementById(
+      "ack-state"
+    ).className =
+      "ack blocked";
   }
 }
 
@@ -282,9 +401,54 @@ function showSafety(result) {
 
 function showActuation(data) {
 
+  // ----------------------------------------------------
+  // BLOCKED / NOT EXECUTED
+  // ----------------------------------------------------
+
+  if (
+    data.executed === false
+  ) {
+
+    // Do NOT activate ACT.
+    // The pipeline stopped during safety validation.
+
+    activateStep(
+      "step-safety"
+    );
+
+
+    document.getElementById(
+      "valve-state"
+    ).textContent =
+      "NO ACTION";
+
+
+    document.getElementById(
+      "ack-state"
+    ).textContent =
+      data.reason
+        ? `✗ ${data.reason}`
+        : "✗ Command blocked by RescueMesh Safety Policy";
+
+
+    document.getElementById(
+      "ack-state"
+    ).className =
+      "ack blocked";
+
+
+    return;
+  }
+
+
+  // ----------------------------------------------------
+  // COMMAND ACTUALLY SENT
+  // ----------------------------------------------------
+
   activateStep(
     "step-act"
   );
+
 
   document.getElementById(
     "valve-state"
@@ -293,10 +457,12 @@ function showActuation(data) {
       data.command
     );
 
+
   document.getElementById(
     "ack-state"
   ).textContent =
     "Command sent — waiting for acknowledgement";
+
 
   document.getElementById(
     "ack-state"
@@ -315,20 +481,62 @@ function showAcknowledgement(data) {
     "step-act"
   );
 
+
   document.getElementById(
     "valve-state"
   ).textContent =
-    data.state || "CLOSED";
+    data.state ||
+    "CLOSED";
+
 
   document.getElementById(
     "ack-state"
   ).textContent =
     "✓ Physical action acknowledged by ESP32";
 
+
   document.getElementById(
     "ack-state"
   ).className =
     "ack success";
+}
+
+
+// ======================================================
+// FAIL-SAFE / ERROR
+// ======================================================
+
+function showError(data) {
+
+  console.error(
+    "[RESCUEMESH FAIL-SAFE]",
+    data
+  );
+
+
+  activateStep(
+    "step-safety"
+  );
+
+
+  document.getElementById(
+    "valve-state"
+  ).textContent =
+    "NO ACTION";
+
+
+  document.getElementById(
+    "ack-state"
+  ).textContent =
+    data.failSafe
+      ? "✗ Fail-safe active — no physical command sent"
+      : "✗ RescueMesh processing error";
+
+
+  document.getElementById(
+    "ack-state"
+  ).className =
+    "ack blocked";
 }
 
 
@@ -351,11 +559,21 @@ function activateStep(id) {
       }
     );
 
-  document
-    .getElementById(id)
-    .classList.add(
+
+  const target =
+    document.getElementById(
+      id
+    );
+
+
+  if (
+    target
+  ) {
+
+    target.classList.add(
       "active"
     );
+  }
 }
 
 
@@ -365,10 +583,19 @@ function activateStep(id) {
 
 function formatAction(action) {
 
-  if (!action) {
+  if (
+    !action
+  ) {
+
     return "—";
   }
 
-  return action
-    .replaceAll("_", " ");
+
+  return String(
+    action
+  )
+    .replaceAll(
+      "_",
+      " "
+    );
 }

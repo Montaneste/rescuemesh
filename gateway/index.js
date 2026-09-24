@@ -7,6 +7,10 @@ const path = require("path");
 
 const { analyzeIncident } = require("./services/jev");
 
+const {
+  getScenario,
+  listScenarios,
+} = require("./scenarios/scenarios");
 
 // ======================================================
 // CONFIGURATION
@@ -107,6 +111,118 @@ const server = http.createServer(
           `[DASHBOARD] Client disconnected (${dashboardClients.size})`
         );
       });
+
+      return;
+    }
+
+
+    // --------------------------------------------------
+    // DEMO API - LIST SCENARIOS
+    // --------------------------------------------------
+
+    if (
+      pathname === "/api/scenarios" &&
+      request.method === "GET"
+    ) {
+      response.writeHead(200, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store",
+      });
+
+      response.end(
+        JSON.stringify(
+          listScenarios(),
+          null,
+          2
+        )
+      );
+
+      return;
+    }
+
+
+    // --------------------------------------------------
+    // DEMO API - RUN SCENARIO
+    // --------------------------------------------------
+
+    if (
+      pathname.startsWith("/api/scenarios/") &&
+      request.method === "POST"
+    ) {
+      const scenarioName =
+        decodeURIComponent(
+          pathname.slice(
+            "/api/scenarios/".length
+          )
+        );
+
+
+      const scenario =
+        getScenario(
+          scenarioName
+        );
+
+
+      if (!scenario) {
+        response.writeHead(404, {
+          "Content-Type":
+            "application/json; charset=utf-8",
+          "Cache-Control":
+            "no-store",
+        });
+
+        response.end(
+          JSON.stringify({
+            accepted: false,
+            error: "Unknown demo scenario",
+            scenario: scenarioName,
+          })
+        );
+
+        return;
+      }
+
+
+      console.log();
+      console.log(
+        "========== DEMO SCENARIO =========="
+      );
+
+      console.log(
+        `[DEMO] ${scenario.name}`
+      );
+
+      console.log(
+        "==================================="
+      );
+
+
+      response.writeHead(202, {
+        "Content-Type":
+          "application/json; charset=utf-8",
+        "Cache-Control":
+          "no-store",
+      });
+
+      response.end(
+        JSON.stringify({
+          accepted: true,
+          scenario: scenarioName,
+          name: scenario.name,
+        })
+      );
+
+
+      // Run exactly the same RescueMesh pipeline used
+      // by a physical ESP32 incident.
+      //
+      // Optional decision overrides are intended only
+      // for controlled demonstration scenarios.
+      processEvent(
+        scenario.event,
+        scenario.overrides || null
+      );
+
 
       return;
     }
@@ -528,7 +644,8 @@ parser.on(
 // ======================================================
 
 async function processEvent(
-  event
+  event,
+  decisionOverrides = null
 ) {
 
   console.log();
@@ -570,10 +687,45 @@ async function processEvent(
     // AI DECISION LAYER
     // --------------------------------------------------
 
-    const decision =
+    let decision =
       await analyzeIncident(
         event
       );
+
+
+    // --------------------------------------------------
+    // DEMO DECISION OVERRIDE
+    // --------------------------------------------------
+    //
+    // This does NOT bypass the RescueMesh Safety Policy.
+    //
+    // It allows controlled demo scenarios to alter
+    // selected fields returned by the Jev adapter,
+    // e.g. confidence = 0.42.
+    //
+    // The resulting decision still passes through the
+    // complete local validation and actuation pipeline.
+    // --------------------------------------------------
+
+    if (
+      decisionOverrides &&
+      typeof decisionOverrides === "object"
+    ) {
+
+      decision = {
+        ...decision,
+        ...decisionOverrides,
+
+        source:
+          `${decision.source || "jev"}+demo-override`,
+      };
+
+
+      console.log(
+        "[DEMO] Decision override applied:",
+        decisionOverrides
+      );
+    }
 
 
     // --------------------------------------------------
