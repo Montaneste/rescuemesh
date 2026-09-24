@@ -11,6 +11,9 @@ const { analyzeIncident } = require("./services/jev");
 const SERIAL_PORT = "COM5";
 const BAUD_RATE = 115200;
 
+// Minimum AI confidence required for automatic actuation.
+const MIN_AUTOMATIC_CONFIDENCE = 0.90;
+
 
 // ======================================================
 // SERIAL CONNECTION
@@ -44,6 +47,9 @@ console.log("================================");
 console.log(" RescueMesh Gateway");
 console.log("================================");
 console.log(`Serial: ${SERIAL_PORT} @ ${BAUD_RATE}`);
+console.log(
+  `Safety confidence threshold: ${MIN_AUTOMATIC_CONFIDENCE}`
+);
 console.log("Waiting for ESP32...");
 console.log();
 
@@ -176,7 +182,8 @@ parser.on("data", (rawLine) => {
 async function processEvent(event) {
 
   console.log();
-  console.log("========== EVENT ==========");
+  console.log("========== INCIDENT ==========");
+
   console.log(
     JSON.stringify(
       event,
@@ -184,7 +191,8 @@ async function processEvent(event) {
       2
     )
   );
-  console.log("===========================");
+
+  console.log("==============================");
   console.log();
 
 
@@ -203,7 +211,8 @@ async function processEvent(event) {
     // --------------------------------------------------
 
     executeDecision(
-      decision
+      decision,
+      event
     );
 
   } catch (error) {
@@ -212,7 +221,281 @@ async function processEvent(event) {
       "[JEV] Analysis failed:",
       error.message
     );
+
+    console.log(
+      "[SAFETY] Fail-safe: no physical command sent."
+    );
   }
+}
+
+
+// ======================================================
+// SAFETY POLICY
+// ======================================================
+
+function validateSafetyPolicy(
+  decision,
+  event
+) {
+
+  const checks = [];
+
+  let approved = true;
+
+
+  // ----------------------------------------------------
+  // CHECK 1 - VALID DECISION OBJECT
+  // ----------------------------------------------------
+
+  const validDecision =
+    decision !== null &&
+    typeof decision === "object";
+
+  checks.push({
+    name: "Valid decision object",
+    passed: validDecision,
+  });
+
+  if (!validDecision) {
+
+    return {
+      approved: false,
+      checks,
+      reason:
+        "Jev returned an invalid decision object.",
+    };
+  }
+
+
+  // ----------------------------------------------------
+  // CHECK 2 - ACTION ALLOWLIST
+  // ----------------------------------------------------
+
+  const allowedActions = [
+    "VALVE_CLOSE",
+    "VALVE_OPEN",
+    "NONE",
+  ];
+
+  const actionAllowed =
+    allowedActions.includes(
+      decision.action
+    );
+
+  checks.push({
+    name: "Action is allowlisted",
+    passed: actionAllowed,
+  });
+
+  if (!actionAllowed) {
+    approved = false;
+  }
+
+
+  // ----------------------------------------------------
+  // CHECK 3 - CONFIDENCE FORMAT
+  // ----------------------------------------------------
+
+  const confidenceValid =
+    typeof decision.confidence === "number" &&
+    Number.isFinite(decision.confidence) &&
+    decision.confidence >= 0 &&
+    decision.confidence <= 1;
+
+  checks.push({
+    name: "Confidence value is valid",
+    passed: confidenceValid,
+  });
+
+  if (!confidenceValid) {
+    approved = false;
+  }
+
+
+  // ----------------------------------------------------
+  // CHECK 4 - AUTOMATIC CONFIDENCE THRESHOLD
+  // ----------------------------------------------------
+
+  let confidenceSufficient = true;
+
+  if (
+    decision.action !== "NONE"
+  ) {
+
+    confidenceSufficient =
+      confidenceValid &&
+      decision.confidence >=
+        MIN_AUTOMATIC_CONFIDENCE;
+  }
+
+  checks.push({
+    name: `Confidence >= ${MIN_AUTOMATIC_CONFIDENCE}`,
+    passed: confidenceSufficient,
+  });
+
+  if (!confidenceSufficient) {
+    approved = false;
+  }
+
+
+  // ----------------------------------------------------
+  // CHECK 5 - HUMAN CONFIRMATION
+  // ----------------------------------------------------
+
+  const confirmationNotRequired =
+    decision.requires_confirmation === false;
+
+  checks.push({
+    name: "No human confirmation required",
+    passed:
+      decision.action === "NONE"
+        ? true
+        : confirmationNotRequired,
+  });
+
+  if (
+    decision.action !== "NONE" &&
+    !confirmationNotRequired
+  ) {
+    approved = false;
+  }
+
+
+  // ====================================================
+  // PHYSICAL CONTEXT VALIDATION
+  // ====================================================
+
+
+  // ----------------------------------------------------
+  // VALVE_CLOSE POLICY
+  // ----------------------------------------------------
+
+  if (
+    decision.action === "VALVE_CLOSE"
+  ) {
+
+    const waterDetected =
+      event.water_detected === true;
+
+    const activeFlow =
+      Number.isFinite(event.flow) &&
+      event.flow > 0;
+
+    const propertyUnoccupied =
+      event.occupancy === "away";
+
+
+    checks.push({
+      name: "Water physically detected",
+      passed: waterDetected,
+    });
+
+    checks.push({
+      name: "Active water flow detected",
+      passed: activeFlow,
+    });
+
+    checks.push({
+      name: "Property is unoccupied",
+      passed: propertyUnoccupied,
+    });
+
+
+    if (
+      !waterDetected ||
+      !activeFlow ||
+      !propertyUnoccupied
+    ) {
+      approved = false;
+    }
+  }
+
+
+  // ----------------------------------------------------
+  // VALVE_OPEN POLICY
+  // ----------------------------------------------------
+
+  if (
+    decision.action === "VALVE_OPEN"
+  ) {
+
+    /*
+     * For safety, RescueMesh does NOT currently permit
+     * autonomous reopening of a valve.
+     *
+     * Closing water can mitigate damage.
+     * Reopening water may recreate the hazardous state.
+     *
+     * Future implementation:
+     * require explicit human confirmation.
+     */
+
+    checks.push({
+      name: "Automatic valve reopening permitted",
+      passed: false,
+    });
+
+    approved = false;
+  }
+
+
+  // ----------------------------------------------------
+  // FINAL RESULT
+  // ----------------------------------------------------
+
+  return {
+    approved,
+    checks,
+    reason: approved
+      ? "Safety policy requirements satisfied."
+      : "Safety policy requirements not satisfied.",
+  };
+}
+
+
+// ======================================================
+// DISPLAY SAFETY RESULT
+// ======================================================
+
+function printSafetyResult(result) {
+
+  console.log();
+  console.log("========== SAFETY ==========");
+
+  for (
+    const check of result.checks
+  ) {
+
+    const symbol =
+      check.passed
+        ? "✓"
+        : "✗";
+
+    console.log(
+      `${symbol} ${check.name}`
+    );
+  }
+
+  console.log("----------------------------");
+
+  if (result.approved) {
+
+    console.log(
+      "[SAFETY] DECISION APPROVED"
+    );
+
+  } else {
+
+    console.log(
+      "[SAFETY] DECISION BLOCKED"
+    );
+  }
+
+  console.log(
+    `[SAFETY] ${result.reason}`
+  );
+
+  console.log("============================");
 }
 
 
@@ -220,7 +503,10 @@ async function processEvent(event) {
 // VALIDATE AND EXECUTE DECISION
 // ======================================================
 
-function executeDecision(decision) {
+function executeDecision(
+  decision,
+  event
+) {
 
   console.log();
   console.log("========= DECISION =========");
@@ -236,42 +522,29 @@ function executeDecision(decision) {
   console.log("============================");
 
 
-  // ====================================================
-  // BASIC RESPONSE VALIDATION
-  // ====================================================
+  // ----------------------------------------------------
+  // SAFETY VALIDATION
+  // ----------------------------------------------------
 
-  if (
-    !decision ||
-    typeof decision !== "object"
-  ) {
-
-    console.error(
-      "[SAFETY] Invalid decision object."
+  const safetyResult =
+    validateSafetyPolicy(
+      decision,
+      event
     );
 
-    return;
-  }
+  printSafetyResult(
+    safetyResult
+  );
 
 
-  // ====================================================
-  // ACTION ALLOWLIST
-  // ====================================================
+  // ----------------------------------------------------
+  // BLOCK UNSAFE DECISION
+  // ----------------------------------------------------
 
-  const allowedActions = [
-    "VALVE_CLOSE",
-    "VALVE_OPEN",
-    "NONE",
-  ];
+  if (!safetyResult.approved) {
 
-
-  if (
-    !allowedActions.includes(
-      decision.action
-    )
-  ) {
-
-    console.error(
-      `[SAFETY] Blocked invalid action: ${decision.action}`
+    console.log(
+      "→ NO COMMAND SENT TO ESP32"
     );
 
     return;
@@ -284,32 +557,20 @@ function executeDecision(decision) {
 
   switch (decision.action) {
 
+
     // --------------------------------------------------
     // CLOSE VALVE
     // --------------------------------------------------
 
     case "VALVE_CLOSE":
 
-      console.log(
-        "[SAFETY] Action validated."
-      );
-
+      console.log();
       console.log(
         "→ Sending VALVE_CLOSE to ESP32"
       );
 
-      port.write(
-        "VALVE_CLOSE\n",
-        (error) => {
-
-          if (error) {
-
-            console.error(
-              "[SERIAL] Failed to send command:",
-              error.message
-            );
-          }
-        }
+      sendCommand(
+        "VALVE_CLOSE"
       );
 
       break;
@@ -321,26 +582,19 @@ function executeDecision(decision) {
 
     case "VALVE_OPEN":
 
-      console.log(
-        "[SAFETY] Action validated."
-      );
+      /*
+       * This case should currently never execute because
+       * automatic reopening is blocked by the safety
+       * policy.
+       */
 
+      console.log();
       console.log(
         "→ Sending VALVE_OPEN to ESP32"
       );
 
-      port.write(
-        "VALVE_OPEN\n",
-        (error) => {
-
-          if (error) {
-
-            console.error(
-              "[SERIAL] Failed to send command:",
-              error.message
-            );
-          }
-        }
+      sendCommand(
+        "VALVE_OPEN"
       );
 
       break;
@@ -352,14 +606,39 @@ function executeDecision(decision) {
 
     case "NONE":
 
-      console.log(
-        "[SAFETY] Action validated."
-      );
-
+      console.log();
       console.log(
         "→ No physical action required."
       );
 
       break;
   }
+}
+
+
+// ======================================================
+// SEND COMMAND TO ESP32
+// ======================================================
+
+function sendCommand(command) {
+
+  port.write(
+    `${command}\n`,
+    (error) => {
+
+      if (error) {
+
+        console.error(
+          "[SERIAL] Failed to send command:",
+          error.message
+        );
+
+        return;
+      }
+
+      console.log(
+        `[SERIAL] Command sent: ${command}`
+      );
+    }
+  );
 }
