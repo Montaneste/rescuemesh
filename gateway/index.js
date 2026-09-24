@@ -1,6 +1,10 @@
 const { SerialPort } = require("serialport");
 const { ReadlineParser } = require("@serialport/parser-readline");
 
+const http = require("http");
+const fs = require("fs");
+const path = require("path");
+
 const { analyzeIncident } = require("./services/jev");
 
 
@@ -11,8 +15,18 @@ const { analyzeIncident } = require("./services/jev");
 const SERIAL_PORT = "COM5";
 const BAUD_RATE = 115200;
 
+const HTTP_PORT = 3000;
+
 // Minimum AI confidence required for automatic actuation.
 const MIN_AUTOMATIC_CONFIDENCE = 0.90;
+
+
+// ======================================================
+// PATHS
+// ======================================================
+
+const DASHBOARD_DIR =
+  path.join(__dirname, "..", "dashboard");
 
 
 // ======================================================
@@ -37,6 +51,227 @@ const parser = port.pipe(
 
 let currentEvent = null;
 
+// Connected dashboard SSE clients.
+const dashboardClients = new Set();
+
+
+// ======================================================
+// HTTP / DASHBOARD SERVER
+// ======================================================
+
+const server = http.createServer(
+  (request, response) => {
+
+    const requestUrl =
+      new URL(
+        request.url,
+        `http://${request.headers.host || "localhost"}`
+      );
+
+    const pathname =
+      requestUrl.pathname;
+
+
+    // --------------------------------------------------
+    // SSE EVENT STREAM
+    // --------------------------------------------------
+
+    if (pathname === "/events") {
+
+      response.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "Access-Control-Allow-Origin": "*",
+      });
+
+      // Force headers to be sent immediately.
+      response.flushHeaders?.();
+
+      // Initial SSE comment.
+      response.write(
+        ": RescueMesh dashboard connected\n\n"
+      );
+
+      dashboardClients.add(response);
+
+      console.log(
+        `[DASHBOARD] Client connected (${dashboardClients.size})`
+      );
+
+      request.on("close", () => {
+
+        dashboardClients.delete(response);
+
+        console.log(
+          `[DASHBOARD] Client disconnected (${dashboardClients.size})`
+        );
+      });
+
+      return;
+    }
+
+
+    // --------------------------------------------------
+    // DASHBOARD FILES
+    // --------------------------------------------------
+
+    const files = {
+      "/": {
+        name: "index.html",
+        contentType: "text/html; charset=utf-8",
+      },
+
+      "/index.html": {
+        name: "index.html",
+        contentType: "text/html; charset=utf-8",
+      },
+
+      "/style.css": {
+        name: "style.css",
+        contentType: "text/css; charset=utf-8",
+      },
+
+      "/app.js": {
+        name: "app.js",
+        contentType:
+          "application/javascript; charset=utf-8",
+      },
+    };
+
+
+    const requestedFile =
+      files[pathname];
+
+
+    if (!requestedFile) {
+
+      response.writeHead(
+        404,
+        {
+          "Content-Type":
+            "text/plain; charset=utf-8",
+        }
+      );
+
+      response.end(
+        "404 - Not Found"
+      );
+
+      return;
+    }
+
+
+    const filePath =
+      path.join(
+        DASHBOARD_DIR,
+        requestedFile.name
+      );
+
+
+    fs.readFile(
+      filePath,
+      (error, content) => {
+
+        if (error) {
+
+          console.error(
+            "[HTTP] Failed to read dashboard file:",
+            error.message
+          );
+
+          response.writeHead(
+            500,
+            {
+              "Content-Type":
+                "text/plain; charset=utf-8",
+            }
+          );
+
+          response.end(
+            "500 - Dashboard file unavailable"
+          );
+
+          return;
+        }
+
+
+        response.writeHead(
+          200,
+          {
+            "Content-Type":
+              requestedFile.contentType,
+
+            "Cache-Control":
+              "no-store",
+          }
+        );
+
+        response.end(content);
+      }
+    );
+  }
+);
+
+
+// ======================================================
+// BROADCAST DASHBOARD EVENT
+// ======================================================
+
+function broadcast(
+  type,
+  payload
+) {
+
+  const message =
+    JSON.stringify({
+      type,
+      payload,
+      timestamp:
+        new Date().toISOString(),
+    });
+
+
+  for (
+    const client of dashboardClients
+  ) {
+
+    try {
+
+      client.write(
+        `data: ${message}\n\n`
+      );
+
+    } catch (error) {
+
+      dashboardClients.delete(
+        client
+      );
+
+      console.error(
+        "[DASHBOARD] Failed to send event:",
+        error.message
+      );
+    }
+  }
+}
+
+
+// ======================================================
+// START HTTP SERVER
+// ======================================================
+
+server.listen(
+  HTTP_PORT,
+  "127.0.0.1",
+  () => {
+
+    console.log(
+      `[DASHBOARD] http://localhost:${HTTP_PORT}`
+    );
+  }
+);
+
 
 // ======================================================
 // STARTUP
@@ -46,11 +281,23 @@ console.log();
 console.log("================================");
 console.log(" RescueMesh Gateway");
 console.log("================================");
-console.log(`Serial: ${SERIAL_PORT} @ ${BAUD_RATE}`);
+
+console.log(
+  `Serial: ${SERIAL_PORT} @ ${BAUD_RATE}`
+);
+
 console.log(
   `Safety confidence threshold: ${MIN_AUTOMATIC_CONFIDENCE}`
 );
-console.log("Waiting for ESP32...");
+
+console.log(
+  `Dashboard: http://localhost:${HTTP_PORT}`
+);
+
+console.log(
+  "Waiting for ESP32..."
+);
+
 console.log();
 
 
@@ -58,131 +305,238 @@ console.log();
 // SERIAL EVENTS
 // ======================================================
 
-port.on("open", () => {
-  console.log("✓ Serial connection opened.");
-});
+port.on(
+  "open",
+  () => {
 
-port.on("error", (error) => {
-  console.error(
-    "[SERIAL] Error:",
-    error.message
-  );
-});
+    console.log(
+      "✓ Serial connection opened."
+    );
+
+    broadcast(
+      "device",
+      {
+        connected: true,
+        device: "ESP32-C3",
+      }
+    );
+  }
+);
+
+
+port.on(
+  "error",
+  (error) => {
+
+    console.error(
+      "[SERIAL] Error:",
+      error.message
+    );
+
+    broadcast(
+      "device",
+      {
+        connected: false,
+        error: error.message,
+      }
+    );
+  }
+);
 
 
 // ======================================================
 // RECEIVE DATA FROM ESP32
 // ======================================================
 
-parser.on("data", (rawLine) => {
+parser.on(
+  "data",
+  (rawLine) => {
 
-  const line = rawLine.trim();
-
-  if (!line) {
-    return;
-  }
-
-  console.log(`[ESP32] ${line}`);
+    const line =
+      rawLine.trim();
 
 
-  // ----------------------------------------------------
-  // START OF LEAK EVENT
-  // ----------------------------------------------------
-
-  if (line === "LEAK_EVENT") {
-
-    currentEvent = {
-      type: "leak",
-      timestamp: new Date().toISOString(),
-    };
-
-    return;
-  }
-
-
-  // ----------------------------------------------------
-  // EVENT PARAMETERS
-  // ----------------------------------------------------
-
-  if (
-    currentEvent &&
-    line.includes("=")
-  ) {
-
-    const separatorIndex =
-      line.indexOf("=");
-
-    const key =
-      line
-        .slice(0, separatorIndex)
-        .trim();
-
-    const value =
-      line
-        .slice(separatorIndex + 1)
-        .trim();
-
-
-    switch (key) {
-
-      case "water_detected":
-
-        currentEvent.water_detected =
-          value === "true";
-
-        break;
-
-
-      case "flow":
-
-        currentEvent.flow =
-          Number(value);
-
-        break;
-
-
-      case "occupancy":
-
-        currentEvent.occupancy =
-          value;
-
-        break;
+    if (!line) {
+      return;
     }
 
 
+    console.log(
+      `[ESP32] ${line}`
+    );
+
+
     // --------------------------------------------------
-    // COMPLETE EVENT?
+    // PHYSICAL ACKNOWLEDGEMENTS
     // --------------------------------------------------
 
-    const eventComplete =
-      currentEvent.water_detected !== undefined &&
-      Number.isFinite(currentEvent.flow) &&
-      currentEvent.occupancy !== undefined;
+    if (
+      line === "VALVE_CLOSED_ACK"
+    ) {
 
+      broadcast(
+        "ack",
+        {
+          command:
+            "VALVE_CLOSE",
 
-    if (eventComplete) {
+          state:
+            "CLOSED",
 
-      const completedEvent =
-        currentEvent;
-
-      currentEvent = null;
-
-      processEvent(
-        completedEvent
+          acknowledged:
+            true,
+        }
       );
+
+      return;
+    }
+
+
+    if (
+      line === "VALVE_OPENED_ACK"
+    ) {
+
+      broadcast(
+        "ack",
+        {
+          command:
+            "VALVE_OPEN",
+
+          state:
+            "OPEN",
+
+          acknowledged:
+            true,
+        }
+      );
+
+      return;
+    }
+
+
+    // --------------------------------------------------
+    // START OF LEAK EVENT
+    // --------------------------------------------------
+
+    if (
+      line === "LEAK_EVENT"
+    ) {
+
+      currentEvent = {
+        type: "leak",
+
+        timestamp:
+          new Date().toISOString(),
+      };
+
+      return;
+    }
+
+
+    // --------------------------------------------------
+    // EVENT PARAMETERS
+    // --------------------------------------------------
+
+    if (
+      currentEvent &&
+      line.includes("=")
+    ) {
+
+      const separatorIndex =
+        line.indexOf("=");
+
+
+      const key =
+        line
+          .slice(
+            0,
+            separatorIndex
+          )
+          .trim();
+
+
+      const value =
+        line
+          .slice(
+            separatorIndex + 1
+          )
+          .trim();
+
+
+      switch (key) {
+
+        case "water_detected":
+
+          currentEvent.water_detected =
+            value === "true";
+
+          break;
+
+
+        case "flow":
+
+          currentEvent.flow =
+            Number(value);
+
+          break;
+
+
+        case "occupancy":
+
+          currentEvent.occupancy =
+            value;
+
+          break;
+      }
+
+
+      // ------------------------------------------------
+      // COMPLETE EVENT?
+      // ------------------------------------------------
+
+      const eventComplete =
+        currentEvent.water_detected !==
+          undefined &&
+
+        Number.isFinite(
+          currentEvent.flow
+        ) &&
+
+        currentEvent.occupancy !==
+          undefined;
+
+
+      if (eventComplete) {
+
+        const completedEvent =
+          currentEvent;
+
+        currentEvent = null;
+
+
+        processEvent(
+          completedEvent
+        );
+      }
     }
   }
-});
+);
 
 
 // ======================================================
 // PROCESS INCIDENT
 // ======================================================
 
-async function processEvent(event) {
+async function processEvent(
+  event
+) {
 
   console.log();
-  console.log("========== INCIDENT ==========");
+
+  console.log(
+    "========== INCIDENT =========="
+  );
+
 
   console.log(
     JSON.stringify(
@@ -192,8 +546,22 @@ async function processEvent(event) {
     )
   );
 
-  console.log("==============================");
+
+  console.log(
+    "=============================="
+  );
+
   console.log();
+
+
+  // ----------------------------------------------------
+  // DASHBOARD: INCIDENT
+  // ----------------------------------------------------
+
+  broadcast(
+    "incident",
+    event
+  );
 
 
   try {
@@ -203,7 +571,19 @@ async function processEvent(event) {
     // --------------------------------------------------
 
     const decision =
-      await analyzeIncident(event);
+      await analyzeIncident(
+        event
+      );
+
+
+    // --------------------------------------------------
+    // DASHBOARD: JEV DECISION
+    // --------------------------------------------------
+
+    broadcast(
+      "decision",
+      decision
+    );
 
 
     // --------------------------------------------------
@@ -222,8 +602,22 @@ async function processEvent(event) {
       error.message
     );
 
+
     console.log(
       "[SAFETY] Fail-safe: no physical command sent."
+    );
+
+
+    broadcast(
+      "error",
+      {
+        stage: "jev",
+
+        message:
+          error.message,
+
+        failSafe: true,
+      }
     );
   }
 }
@@ -251,16 +645,23 @@ function validateSafetyPolicy(
     decision !== null &&
     typeof decision === "object";
 
+
   checks.push({
-    name: "Valid decision object",
-    passed: validDecision,
+    name:
+      "Valid decision object",
+
+    passed:
+      validDecision,
   });
+
 
   if (!validDecision) {
 
     return {
       approved: false,
+
       checks,
+
       reason:
         "Jev returned an invalid decision object.",
     };
@@ -277,15 +678,21 @@ function validateSafetyPolicy(
     "NONE",
   ];
 
+
   const actionAllowed =
     allowedActions.includes(
       decision.action
     );
 
+
   checks.push({
-    name: "Action is allowlisted",
-    passed: actionAllowed,
+    name:
+      "Action is allowlisted",
+
+    passed:
+      actionAllowed,
   });
+
 
   if (!actionAllowed) {
     approved = false;
@@ -297,15 +704,26 @@ function validateSafetyPolicy(
   // ----------------------------------------------------
 
   const confidenceValid =
-    typeof decision.confidence === "number" &&
-    Number.isFinite(decision.confidence) &&
+    typeof decision.confidence ===
+      "number" &&
+
+    Number.isFinite(
+      decision.confidence
+    ) &&
+
     decision.confidence >= 0 &&
+
     decision.confidence <= 1;
 
+
   checks.push({
-    name: "Confidence value is valid",
-    passed: confidenceValid,
+    name:
+      "Confidence value is valid",
+
+    passed:
+      confidenceValid,
   });
+
 
   if (!confidenceValid) {
     approved = false;
@@ -316,7 +734,9 @@ function validateSafetyPolicy(
   // CHECK 4 - AUTOMATIC CONFIDENCE THRESHOLD
   // ----------------------------------------------------
 
-  let confidenceSufficient = true;
+  let confidenceSufficient =
+    true;
+
 
   if (
     decision.action !== "NONE"
@@ -324,16 +744,24 @@ function validateSafetyPolicy(
 
     confidenceSufficient =
       confidenceValid &&
+
       decision.confidence >=
         MIN_AUTOMATIC_CONFIDENCE;
   }
 
+
   checks.push({
-    name: `Confidence >= ${MIN_AUTOMATIC_CONFIDENCE}`,
-    passed: confidenceSufficient,
+    name:
+      `Confidence >= ${MIN_AUTOMATIC_CONFIDENCE}`,
+
+    passed:
+      confidenceSufficient,
   });
 
-  if (!confidenceSufficient) {
+
+  if (
+    !confidenceSufficient
+  ) {
     approved = false;
   }
 
@@ -343,20 +771,26 @@ function validateSafetyPolicy(
   // ----------------------------------------------------
 
   const confirmationNotRequired =
-    decision.requires_confirmation === false;
+    decision.requires_confirmation ===
+      false;
+
 
   checks.push({
-    name: "No human confirmation required",
+    name:
+      "No human confirmation required",
+
     passed:
       decision.action === "NONE"
         ? true
         : confirmationNotRequired,
   });
 
+
   if (
     decision.action !== "NONE" &&
     !confirmationNotRequired
   ) {
+
     approved = false;
   }
 
@@ -371,33 +805,51 @@ function validateSafetyPolicy(
   // ----------------------------------------------------
 
   if (
-    decision.action === "VALVE_CLOSE"
+    decision.action ===
+      "VALVE_CLOSE"
   ) {
 
     const waterDetected =
-      event.water_detected === true;
+      event.water_detected ===
+        true;
+
 
     const activeFlow =
-      Number.isFinite(event.flow) &&
+      Number.isFinite(
+        event.flow
+      ) &&
       event.flow > 0;
 
+
     const propertyUnoccupied =
-      event.occupancy === "away";
+      event.occupancy ===
+        "away";
 
 
     checks.push({
-      name: "Water physically detected",
-      passed: waterDetected,
+      name:
+        "Water physically detected",
+
+      passed:
+        waterDetected,
     });
 
-    checks.push({
-      name: "Active water flow detected",
-      passed: activeFlow,
-    });
 
     checks.push({
-      name: "Property is unoccupied",
-      passed: propertyUnoccupied,
+      name:
+        "Active water flow detected",
+
+      passed:
+        activeFlow,
+    });
+
+
+    checks.push({
+      name:
+        "Property is unoccupied",
+
+      passed:
+        propertyUnoccupied,
     });
 
 
@@ -406,6 +858,7 @@ function validateSafetyPolicy(
       !activeFlow ||
       !propertyUnoccupied
     ) {
+
       approved = false;
     }
   }
@@ -416,24 +869,26 @@ function validateSafetyPolicy(
   // ----------------------------------------------------
 
   if (
-    decision.action === "VALVE_OPEN"
+    decision.action ===
+      "VALVE_OPEN"
   ) {
 
     /*
-     * For safety, RescueMesh does NOT currently permit
-     * autonomous reopening of a valve.
+     * RescueMesh intentionally blocks autonomous
+     * valve reopening.
      *
-     * Closing water can mitigate damage.
-     * Reopening water may recreate the hazardous state.
-     *
-     * Future implementation:
-     * require explicit human confirmation.
+     * Reopening must require explicit human
+     * confirmation in a future implementation.
      */
 
     checks.push({
-      name: "Automatic valve reopening permitted",
-      passed: false,
+      name:
+        "Automatic valve reopening permitted",
+
+      passed:
+        false,
     });
+
 
     approved = false;
   }
@@ -444,11 +899,15 @@ function validateSafetyPolicy(
   // ----------------------------------------------------
 
   return {
+
     approved,
+
     checks,
-    reason: approved
-      ? "Safety policy requirements satisfied."
-      : "Safety policy requirements not satisfied.",
+
+    reason:
+      approved
+        ? "Safety policy requirements satisfied."
+        : "Safety policy requirements not satisfied.",
   };
 }
 
@@ -457,10 +916,16 @@ function validateSafetyPolicy(
 // DISPLAY SAFETY RESULT
 // ======================================================
 
-function printSafetyResult(result) {
+function printSafetyResult(
+  result
+) {
 
   console.log();
-  console.log("========== SAFETY ==========");
+
+  console.log(
+    "========== SAFETY =========="
+  );
+
 
   for (
     const check of result.checks
@@ -471,14 +936,21 @@ function printSafetyResult(result) {
         ? "✓"
         : "✗";
 
+
     console.log(
       `${symbol} ${check.name}`
     );
   }
 
-  console.log("----------------------------");
 
-  if (result.approved) {
+  console.log(
+    "----------------------------"
+  );
+
+
+  if (
+    result.approved
+  ) {
 
     console.log(
       "[SAFETY] DECISION APPROVED"
@@ -491,11 +963,15 @@ function printSafetyResult(result) {
     );
   }
 
+
   console.log(
     `[SAFETY] ${result.reason}`
   );
 
-  console.log("============================");
+
+  console.log(
+    "============================"
+  );
 }
 
 
@@ -509,7 +985,11 @@ function executeDecision(
 ) {
 
   console.log();
-  console.log("========= DECISION =========");
+
+  console.log(
+    "========= DECISION ========="
+  );
+
 
   console.log(
     JSON.stringify(
@@ -519,7 +999,10 @@ function executeDecision(
     )
   );
 
-  console.log("============================");
+
+  console.log(
+    "============================"
+  );
 
 
   // ----------------------------------------------------
@@ -532,7 +1015,18 @@ function executeDecision(
       event
     );
 
+
   printSafetyResult(
+    safetyResult
+  );
+
+
+  // ----------------------------------------------------
+  // DASHBOARD: SAFETY RESULT
+  // ----------------------------------------------------
+
+  broadcast(
+    "safety",
     safetyResult
   );
 
@@ -541,11 +1035,27 @@ function executeDecision(
   // BLOCK UNSAFE DECISION
   // ----------------------------------------------------
 
-  if (!safetyResult.approved) {
+  if (
+    !safetyResult.approved
+  ) {
 
     console.log(
       "→ NO COMMAND SENT TO ESP32"
     );
+
+
+    broadcast(
+      "actuation",
+      {
+        command: null,
+
+        executed: false,
+
+        reason:
+          "Blocked by RescueMesh Safety Policy",
+      }
+    );
+
 
     return;
   }
@@ -555,7 +1065,9 @@ function executeDecision(
   // EXECUTION
   // ====================================================
 
-  switch (decision.action) {
+  switch (
+    decision.action
+  ) {
 
 
     // --------------------------------------------------
@@ -565,9 +1077,26 @@ function executeDecision(
     case "VALVE_CLOSE":
 
       console.log();
+
       console.log(
         "→ Sending VALVE_CLOSE to ESP32"
       );
+
+
+      broadcast(
+        "actuation",
+        {
+          command:
+            "VALVE_CLOSE",
+
+          executed:
+            true,
+
+          status:
+            "sent",
+        }
+      );
+
 
       sendCommand(
         "VALVE_CLOSE"
@@ -583,15 +1112,32 @@ function executeDecision(
     case "VALVE_OPEN":
 
       /*
-       * This case should currently never execute because
-       * automatic reopening is blocked by the safety
-       * policy.
+       * This should currently never execute because
+       * autonomous reopening is blocked by the
+       * safety policy.
        */
 
       console.log();
+
       console.log(
         "→ Sending VALVE_OPEN to ESP32"
       );
+
+
+      broadcast(
+        "actuation",
+        {
+          command:
+            "VALVE_OPEN",
+
+          executed:
+            true,
+
+          status:
+            "sent",
+        }
+      );
+
 
       sendCommand(
         "VALVE_OPEN"
@@ -607,8 +1153,24 @@ function executeDecision(
     case "NONE":
 
       console.log();
+
       console.log(
         "→ No physical action required."
+      );
+
+
+      broadcast(
+        "actuation",
+        {
+          command:
+            "NONE",
+
+          executed:
+            false,
+
+          reason:
+            "No physical action required",
+        }
       );
 
       break;
@@ -620,7 +1182,9 @@ function executeDecision(
 // SEND COMMAND TO ESP32
 // ======================================================
 
-function sendCommand(command) {
+function sendCommand(
+  command
+) {
 
   port.write(
     `${command}\n`,
@@ -633,8 +1197,24 @@ function sendCommand(command) {
           error.message
         );
 
+
+        broadcast(
+          "error",
+          {
+            stage:
+              "actuation",
+
+            command,
+
+            message:
+              error.message,
+          }
+        );
+
+
         return;
       }
+
 
       console.log(
         `[SERIAL] Command sent: ${command}`
@@ -642,3 +1222,53 @@ function sendCommand(command) {
     }
   );
 }
+
+
+// ======================================================
+// GRACEFUL SHUTDOWN
+// ======================================================
+
+function shutdown() {
+
+  console.log();
+  console.log(
+    "[SYSTEM] Shutting down RescueMesh..."
+  );
+
+
+  for (
+    const client of dashboardClients
+  ) {
+
+    client.end();
+  }
+
+
+  dashboardClients.clear();
+
+
+  server.close();
+
+
+  if (
+    port.isOpen
+  ) {
+
+    port.close(
+      () => {
+        process.exit(0);
+      }
+    );
+
+    return;
+  }
+
+
+  process.exit(0);
+}
+
+
+process.on(
+  "SIGINT",
+  shutdown
+);
