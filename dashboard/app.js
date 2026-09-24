@@ -116,6 +116,17 @@ function handleDashboardEvent(data) {
 
 function showIncident(event) {
 
+  clearIncidentTrace();
+
+  addTraceEntry(
+    "DETECT",
+    "Water leak detected",
+    `Flow ${event.flow} L/min · Occupancy ${String(
+      event.occupancy
+    ).toUpperCase()}`,
+    "warning"
+  );
+
   activateStep(
     "step-detect"
   );
@@ -204,6 +215,19 @@ function showDecision(decision) {
 
   activateStep(
     "step-ai"
+  );
+
+  addTraceEntry(
+    "JEV",
+    formatAction(
+      decision.action
+    ),
+    `${String(
+      decision.severity
+    ).toUpperCase()} · Confidence ${Math.round(
+      decision.confidence * 100
+    )}%`,
+    "ai"
   );
 
 
@@ -359,13 +383,21 @@ function showSafety(result) {
     document.getElementById(
       "ack-state"
     ).textContent =
-      "No physical action required";
+      "○ No physical action required";
 
 
     document.getElementById(
       "ack-state"
     ).className =
       "ack waiting";
+
+
+    addTraceEntry(
+      "VALIDATE",
+      "Decision accepted",
+      "No physical action required",
+      "success"
+    );
 
 
     return;
@@ -406,6 +438,14 @@ function showSafety(result) {
       "ack-state"
     ).className =
       "ack waiting";
+
+
+    addTraceEntry(
+      "VALIDATE",
+      "Safety policy approved",
+      "Physical actuation authorised",
+      "success"
+    );
 
 
     return;
@@ -453,6 +493,28 @@ function showSafety(result) {
     "ack-state"
   ).className =
     "ack blocked";
+
+
+  const failedChecks =
+    result.checks
+      .filter(
+        (check) =>
+          !check.passed
+      )
+      .map(
+        (check) =>
+          check.name
+      )
+      .join(" · ");
+
+
+  addTraceEntry(
+    "VALIDATE",
+    "Decision blocked",
+    failedChecks ||
+      "Safety policy requirements not satisfied",
+    "blocked"
+  );
 }
 
 // ======================================================
@@ -468,9 +530,6 @@ function showActuation(data) {
   if (
     data.command === "NONE"
   ) {
-
-    // No actuation occurred.
-    // Keep the pipeline at VALIDATE.
 
     activateStep(
       "step-safety"
@@ -563,8 +622,17 @@ function showActuation(data) {
     "ack-state"
   ).className =
     "ack waiting";
-}
 
+
+  addTraceEntry(
+    "ACT",
+    formatAction(
+      data.command
+    ),
+    "Command sent to ESP32-C3",
+    "act"
+  );
+}
 
 // ======================================================
 // ACKNOWLEDGEMENT
@@ -594,8 +662,17 @@ function showAcknowledgement(data) {
     "ack-state"
   ).className =
     "ack success";
-}
 
+
+  addTraceEntry(
+    "ACK",
+    "Physical action confirmed",
+    `ESP32-C3 reports valve ${
+      data.state || "CLOSED"
+    }`,
+    "success"
+  );
+}
 
 // ======================================================
 // FAIL-SAFE / ERROR
@@ -693,6 +770,120 @@ function formatAction(action) {
       "_",
       " "
     );
+}
+
+
+// ======================================================
+// INCIDENT TRACE
+// ======================================================
+
+function clearIncidentTrace() {
+
+  const container =
+    document.getElementById(
+      "incident-trace"
+    );
+
+  if (!container) {
+    return;
+  }
+
+  container.innerHTML = "";
+
+  const status =
+    document.getElementById(
+      "trace-status"
+    );
+
+  if (status) {
+    status.textContent = "LIVE";
+  }
+}
+
+
+function addTraceEntry(
+  stage,
+  message,
+  detail = "",
+  state = ""
+) {
+
+  const container =
+    document.getElementById(
+      "incident-trace"
+    );
+
+  if (!container) {
+    return;
+  }
+
+
+  const empty =
+    container.querySelector(
+      ".trace-empty"
+    );
+
+  if (empty) {
+    empty.remove();
+  }
+
+
+  const entry =
+    document.createElement(
+      "div"
+    );
+
+  entry.className =
+    `trace-entry ${state}`;
+
+
+  const time =
+    new Date()
+      .toLocaleTimeString(
+        [],
+        {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        }
+      );
+
+
+  entry.innerHTML = `
+    <span class="trace-time">
+      ${time}
+    </span>
+
+    <span class="trace-stage">
+      ${stage}
+    </span>
+
+    <span class="trace-message">
+      ${message}
+
+      ${
+        detail
+          ? `<span class="trace-detail">${detail}</span>`
+          : ""
+      }
+    </span>
+  `;
+
+
+  container.appendChild(
+    entry
+  );
+
+
+  const status =
+    document.getElementById(
+      "trace-status"
+    );
+
+  if (status) {
+    status.textContent =
+      "LIVE";
+  }
 }
 
 

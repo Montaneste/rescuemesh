@@ -724,3 +724,158 @@ footer strong {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* ====================================================== */
+/* INCIDENT TRACE */
+/* ====================================================== */
+
+.trace-panel {
+  margin-top: 16px;
+  padding: 16px;
+
+  border: 1px solid #17384a;
+  border-radius: 10px;
+
+  background: #081a25;
+}
+
+
+.trace-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  margin-bottom: 14px;
+}
+
+
+.trace-title {
+  font-size: 10px;
+  font-weight: 800;
+
+  letter-spacing: 1px;
+
+  color: #83b7e8;
+}
+
+
+.trace-subtitle {
+  margin-top: 4px;
+
+  font-size: 9px;
+
+  color: #4e86ad;
+}
+
+
+.trace-status {
+  padding: 5px 10px;
+
+  border: 1px solid #19465e;
+  border-radius: 4px;
+
+  font-size: 9px;
+  font-weight: 800;
+
+  letter-spacing: 0.8px;
+
+  color: #70b8ed;
+}
+
+
+.trace-list {
+  display: flex;
+  flex-direction: column;
+}
+
+
+.trace-empty {
+  padding: 14px 0;
+
+  font-size: 11px;
+
+  color: #56788e;
+}
+
+
+.trace-entry {
+  display: grid;
+
+  grid-template-columns:
+    82px
+    82px
+    1fr;
+
+  gap: 14px;
+
+  align-items: start;
+
+  padding: 10px 0;
+
+  border-top: 1px solid #153444;
+}
+
+
+.trace-entry:first-child {
+  border-top: none;
+}
+
+
+.trace-time {
+  font-size: 10px;
+
+  color: #577e96;
+}
+
+
+.trace-stage {
+  font-size: 10px;
+  font-weight: 800;
+
+  letter-spacing: 0.6px;
+
+  color: #78b8e6;
+}
+
+
+.trace-message {
+  font-size: 11px;
+  font-weight: 600;
+
+  color: #e8f5ff;
+}
+
+
+.trace-detail {
+  display: block;
+
+  margin-top: 3px;
+
+  font-size: 9px;
+  font-weight: 400;
+
+  color: #638aa1;
+}
+
+
+/* TRACE STATES */
+
+.trace-entry.success .trace-stage {
+  color: #38ed92;
+}
+
+
+.trace-entry.blocked .trace-stage {
+  color: #ff4161;
+}
+
+
+.trace-entry.warning .trace-stage {
+  color: #f0b84a;
+}
+
+
+.trace-entry.ai .trace-stage {
+  color: #42a5ff;
+}
