@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
+
+  <title>RescueMesh</title>
+
+  <link
+    rel="stylesheet"
+    href="/style.css"
+  >
+</head>
+
+<body>
+
+  <main class="dashboard">
+
+    <!-- ============================================== -->
+    <!-- HEADER -->
+    <!-- ============================================== -->
+
+    <header class="header">
+
+      <div>
+        <div class="brand">
+          RESCUEMESH
+        </div>
+
+        <div class="subtitle">
+          AI-Assisted Infrastructure Safety
+        </div>
+      </div>
+
+      <div
+        id="system-status"
+        class="status online"
+      >
+        <span class="status-dot"></span>
+        SYSTEM ONLINE
+      </div>
+
+    </header>
+
+
+    <!-- ============================================== -->
+    <!-- PIPELINE -->
+    <!-- ============================================== -->
+
+    <section class="pipeline">
+
+      <div
+        id="step-detect"
+        class="pipeline-step active"
+      >
+        <span class="step-number">1</span>
+        DETECT
+      </div>
+
+      <div class="pipeline-line"></div>
+
+      <div
+        id="step-ai"
+        class="pipeline-step"
+      >
+        <span class="step-number">2</span>
+        JEV
+      </div>
+
+      <div class="pipeline-line"></div>
+
+      <div
+        id="step-safety"
+        class="pipeline-step"
+      >
+        <span class="step-number">3</span>
+        VALIDATE
+      </div>
+
+      <div class="pipeline-line"></div>
+
+      <div
+        id="step-act"
+        class="pipeline-step"
+      >
+        <span class="step-number">4</span>
+        ACT
+      </div>
+
+    </section>
+
+
+    <!-- ============================================== -->
+    <!-- GRID -->
+    <!-- ============================================== -->
+
+    <section class="grid">
+
+
+      <!-- INCIDENT -->
+
+      <article class="card">
+
+        <div class="card-header">
+          <span>INCIDENT</span>
+
+          <span
+            id="severity-badge"
+            class="badge neutral"
+          >
+            MONITORING
+          </span>
+        </div>
+
+        <h2 id="incident-title">
+          No active incident
+        </h2>
+
+        <div class="metric-list">
+
+          <div class="metric">
+            <span>Water detected</span>
+            <strong id="water-value">—</strong>
+          </div>
+
+          <div class="metric">
+            <span>Flow</span>
+            <strong id="flow-value">—</strong>
+          </div>
+
+          <div class="metric">
+            <span>Occupancy</span>
+            <strong id="occupancy-value">—</strong>
+          </div>
+
+          <div class="metric">
+            <span>Timestamp</span>
+            <strong id="timestamp-value">—</strong>
+          </div>
+
+        </div>
+
+      </article>
+
+
+      <!-- JEV -->
+
+      <article class="card">
+
+        <div class="card-header">
+          <span>JEV ANALYSIS</span>
+
+          <span
+            id="jev-mode"
+            class="badge ai"
+          >
+            WAITING
+          </span>
+        </div>
+
+        <h2 id="jev-action">
+          Awaiting incident
+        </h2>
+
+        <div class="metric-list">
+
+          <div class="metric">
+            <span>Confidence</span>
+            <strong id="confidence-value">—</strong>
+          </div>
+
+          <div class="metric">
+            <span>Severity</span>
+            <strong id="jev-severity">—</strong>
+          </div>
+
+          <div class="metric metric-column">
+            <span>Reasoning</span>
+            <strong id="reason-value">
+              No analysis available.
+            </strong>
+          </div>
+
+        </div>
+
+      </article>
+
+
+      <!-- SAFETY -->
+
+      <article class="card">
+
+        <div class="card-header">
+          <span>RESCUEMESH SAFETY POLICY</span>
+
+          <span
+            id="safety-badge"
+            class="badge neutral"
+          >
+            WAITING
+          </span>
+        </div>
+
+        <div
+          id="safety-checks"
+          class="checks"
+        >
+
+          <div class="check pending">
+            ○ Waiting for decision
+          </div>
+
+        </div>
+
+        <div
+          id="safety-result"
+          class="decision waiting"
+        >
+          AWAITING VALIDATION
+        </div>
+
+      </article>
+
+
+      <!-- PHYSICAL RESPONSE -->
+
+      <article class="card">
+
+        <div class="card-header">
+          <span>PHYSICAL RESPONSE</span>
+
+          <span
+            id="device-status"
+            class="badge neutral"
+          >
+            ESP32 CONNECTED
+          </span>
+        </div>
+
+        <div class="actuator">
+
+          <div class="valve-icon">
+            ◉
+          </div>
+
+          <div>
+            <div class="actuator-label">
+              WATER VALVE
+            </div>
+
+            <div
+              id="valve-state"
+              class="actuator-state"
+            >
+              READY
+            </div>
+          </div>
+
+        </div>
+
+        <div
+          id="ack-state"
+          class="ack waiting"
+        >
+          Waiting for physical action
+        </div>
+
+      </article>
+
+    </section>
+
+
+    <!-- ============================================== -->
+    <!-- FOOTER -->
+    <!-- ============================================== -->
+
+    <footer>
+
+      <span>
+        EDGE DEVICE
+        <strong>ESP32-C3</strong>
+      </span>
+
+      <span>
+        DECISION ENGINE
+        <strong id="footer-ai">
+          JEV MOCK
+        </strong>
+      </span>
+
+      <span>
+        SAFETY
+        <strong>
+          LOCAL POLICY
+        </strong>
+      </span>
+
+    </footer>
+
+  </main>
+
+
+  <script src="/app.js"></script>
+
+</body>
+</html>
