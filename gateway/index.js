@@ -1,8 +1,20 @@
 const { SerialPort } = require("serialport");
 const { ReadlineParser } = require("@serialport/parser-readline");
 
+const { analyzeIncident } = require("./services/jev");
+
+
+// ======================================================
+// CONFIGURATION
+// ======================================================
+
 const SERIAL_PORT = "COM5";
 const BAUD_RATE = 115200;
+
+
+// ======================================================
+// SERIAL CONNECTION
+// ======================================================
 
 const port = new SerialPort({
   path: SERIAL_PORT,
@@ -10,34 +22,70 @@ const port = new SerialPort({
 });
 
 const parser = port.pipe(
-  new ReadlineParser({ delimiter: "\n" })
+  new ReadlineParser({
+    delimiter: "\n",
+  })
 );
 
-let event = null;
 
+// ======================================================
+// STATE
+// ======================================================
+
+let currentEvent = null;
+
+
+// ======================================================
+// STARTUP
+// ======================================================
+
+console.log();
 console.log("================================");
 console.log(" RescueMesh Gateway");
 console.log("================================");
 console.log(`Serial: ${SERIAL_PORT} @ ${BAUD_RATE}`);
 console.log("Waiting for ESP32...");
+console.log();
+
+
+// ======================================================
+// SERIAL EVENTS
+// ======================================================
 
 port.on("open", () => {
   console.log("✓ Serial connection opened.");
 });
 
 port.on("error", (error) => {
-  console.error("Serial error:", error.message);
+  console.error(
+    "[SERIAL] Error:",
+    error.message
+  );
 });
 
+
+// ======================================================
+// RECEIVE DATA FROM ESP32
+// ======================================================
+
 parser.on("data", (rawLine) => {
+
   const line = rawLine.trim();
 
-  if (!line) return;
+  if (!line) {
+    return;
+  }
 
   console.log(`[ESP32] ${line}`);
 
+
+  // ----------------------------------------------------
+  // START OF LEAK EVENT
+  // ----------------------------------------------------
+
   if (line === "LEAK_EVENT") {
-    event = {
+
+    currentEvent = {
       type: "leak",
       timestamp: new Date().toISOString(),
     };
@@ -45,86 +93,273 @@ parser.on("data", (rawLine) => {
     return;
   }
 
-  if (event && line.includes("=")) {
-    const [key, value] = line.split("=");
 
-    if (key === "water_detected") {
-      event.water_detected = value === "true";
+  // ----------------------------------------------------
+  // EVENT PARAMETERS
+  // ----------------------------------------------------
+
+  if (
+    currentEvent &&
+    line.includes("=")
+  ) {
+
+    const separatorIndex =
+      line.indexOf("=");
+
+    const key =
+      line
+        .slice(0, separatorIndex)
+        .trim();
+
+    const value =
+      line
+        .slice(separatorIndex + 1)
+        .trim();
+
+
+    switch (key) {
+
+      case "water_detected":
+
+        currentEvent.water_detected =
+          value === "true";
+
+        break;
+
+
+      case "flow":
+
+        currentEvent.flow =
+          Number(value);
+
+        break;
+
+
+      case "occupancy":
+
+        currentEvent.occupancy =
+          value;
+
+        break;
     }
 
-    if (key === "flow") {
-      event.flow = Number(value);
-    }
 
-    if (key === "occupancy") {
-      event.occupancy = value;
-    }
+    // --------------------------------------------------
+    // COMPLETE EVENT?
+    // --------------------------------------------------
 
-    if (
-      event.water_detected !== undefined &&
-      event.flow !== undefined &&
-      event.occupancy !== undefined
-    ) {
-      processEvent(event);
-      event = null;
+    const eventComplete =
+      currentEvent.water_detected !== undefined &&
+      Number.isFinite(currentEvent.flow) &&
+      currentEvent.occupancy !== undefined;
+
+
+    if (eventComplete) {
+
+      const completedEvent =
+        currentEvent;
+
+      currentEvent = null;
+
+      processEvent(
+        completedEvent
+      );
     }
   }
 });
 
-function processEvent(event) {
+
+// ======================================================
+// PROCESS INCIDENT
+// ======================================================
+
+async function processEvent(event) {
+
   console.log();
   console.log("========== EVENT ==========");
-  console.log(JSON.stringify(event, null, 2));
+  console.log(
+    JSON.stringify(
+      event,
+      null,
+      2
+    )
+  );
   console.log("===========================");
   console.log();
 
-  /*
-   * Próximo passo:
-   *
-   * event
-   *   ↓
-   * Jev Client
-   *   ↓
-   * decisão estruturada
-   *   ↓
-   * executeDecision()
-   */
 
-  simulateJevDecision(event);
-}
+  try {
 
-function simulateJevDecision(event) {
-  console.log("[JEV MOCK] Analysing incident...");
+    // --------------------------------------------------
+    // AI DECISION LAYER
+    // --------------------------------------------------
 
-  let decision = {
-    action: "NONE",
-    reason: "No intervention required",
-  };
+    const decision =
+      await analyzeIncident(event);
 
-  if (
-    event.water_detected === true &&
-    event.flow > 0 &&
-    event.occupancy === "away"
-  ) {
-    decision = {
-      action: "VALVE_CLOSE",
-      reason:
-        "Water detected while property is unoccupied.",
-    };
+
+    // --------------------------------------------------
+    // SAFETY + ACTUATION
+    // --------------------------------------------------
+
+    executeDecision(
+      decision
+    );
+
+  } catch (error) {
+
+    console.error(
+      "[JEV] Analysis failed:",
+      error.message
+    );
   }
-
-  executeDecision(decision);
 }
+
+
+// ======================================================
+// VALIDATE AND EXECUTE DECISION
+// ======================================================
 
 function executeDecision(decision) {
+
   console.log();
   console.log("========= DECISION =========");
-  console.log(JSON.stringify(decision, null, 2));
+
+  console.log(
+    JSON.stringify(
+      decision,
+      null,
+      2
+    )
+  );
+
   console.log("============================");
 
-  if (decision.action === "VALVE_CLOSE") {
-    console.log("→ Sending VALVE_CLOSE to ESP32");
 
-    port.write("VALVE_CLOSE\n");
+  // ====================================================
+  // BASIC RESPONSE VALIDATION
+  // ====================================================
+
+  if (
+    !decision ||
+    typeof decision !== "object"
+  ) {
+
+    console.error(
+      "[SAFETY] Invalid decision object."
+    );
+
+    return;
+  }
+
+
+  // ====================================================
+  // ACTION ALLOWLIST
+  // ====================================================
+
+  const allowedActions = [
+    "VALVE_CLOSE",
+    "VALVE_OPEN",
+    "NONE",
+  ];
+
+
+  if (
+    !allowedActions.includes(
+      decision.action
+    )
+  ) {
+
+    console.error(
+      `[SAFETY] Blocked invalid action: ${decision.action}`
+    );
+
+    return;
+  }
+
+
+  // ====================================================
+  // EXECUTION
+  // ====================================================
+
+  switch (decision.action) {
+
+    // --------------------------------------------------
+    // CLOSE VALVE
+    // --------------------------------------------------
+
+    case "VALVE_CLOSE":
+
+      console.log(
+        "[SAFETY] Action validated."
+      );
+
+      console.log(
+        "→ Sending VALVE_CLOSE to ESP32"
+      );
+
+      port.write(
+        "VALVE_CLOSE\n",
+        (error) => {
+
+          if (error) {
+
+            console.error(
+              "[SERIAL] Failed to send command:",
+              error.message
+            );
+          }
+        }
+      );
+
+      break;
+
+
+    // --------------------------------------------------
+    // OPEN VALVE
+    // --------------------------------------------------
+
+    case "VALVE_OPEN":
+
+      console.log(
+        "[SAFETY] Action validated."
+      );
+
+      console.log(
+        "→ Sending VALVE_OPEN to ESP32"
+      );
+
+      port.write(
+        "VALVE_OPEN\n",
+        (error) => {
+
+          if (error) {
+
+            console.error(
+              "[SERIAL] Failed to send command:",
+              error.message
+            );
+          }
+        }
+      );
+
+      break;
+
+
+    // --------------------------------------------------
+    // NO ACTION
+    // --------------------------------------------------
+
+    case "NONE":
+
+      console.log(
+        "[SAFETY] Action validated."
+      );
+
+      console.log(
+        "→ No physical action required."
+      );
+
+      break;
   }
 }
