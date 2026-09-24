@@ -195,7 +195,12 @@ function showIncident(event) {
 // JEV DECISION
 // ======================================================
 
+let currentDecision = null;
+
+
 function showDecision(decision) {
+
+  currentDecision = decision;
 
   activateStep(
     "step-ai"
@@ -320,6 +325,57 @@ function showSafety(result) {
     );
 
 
+  const noAction =
+    result.approved &&
+    currentDecision?.action === "NONE";
+
+
+  // ----------------------------------------------------
+  // VALID DECISION — NO PHYSICAL ACTION REQUIRED
+  // ----------------------------------------------------
+
+  if (noAction) {
+
+    badge.textContent =
+      "NO ACTION";
+
+    badge.className =
+      "badge neutral";
+
+
+    resultElement.textContent =
+      "○ NO ACTION REQUIRED";
+
+    resultElement.className =
+      "decision waiting";
+
+
+    document.getElementById(
+      "valve-state"
+    ).textContent =
+      "NO ACTION";
+
+
+    document.getElementById(
+      "ack-state"
+    ).textContent =
+      "No physical action required";
+
+
+    document.getElementById(
+      "ack-state"
+    ).className =
+      "ack waiting";
+
+
+    return;
+  }
+
+
+  // ----------------------------------------------------
+  // APPROVED PHYSICAL ACTION
+  // ----------------------------------------------------
+
   if (
     result.approved
   ) {
@@ -351,25 +407,71 @@ function showSafety(result) {
     ).className =
       "ack waiting";
 
-  } else {
 
-    badge.textContent =
-      "BLOCKED";
-
-
-    badge.className =
-      "badge blocked";
+    return;
+  }
 
 
-    resultElement.textContent =
-      "✗ DECISION BLOCKED";
+  // ----------------------------------------------------
+  // BLOCKED BY SAFETY POLICY
+  // ----------------------------------------------------
+
+  badge.textContent =
+    "BLOCKED";
 
 
-    resultElement.className =
-      "decision blocked";
+  badge.className =
+    "badge blocked";
 
 
-    // Pipeline intentionally stops at VALIDATE.
+  resultElement.textContent =
+    "✗ DECISION BLOCKED";
+
+
+  resultElement.className =
+    "decision blocked";
+
+
+  activateStep(
+    "step-safety"
+  );
+
+
+  document.getElementById(
+    "valve-state"
+  ).textContent =
+    "NO ACTION";
+
+
+  document.getElementById(
+    "ack-state"
+  ).textContent =
+    "✗ Command blocked by RescueMesh Safety Policy";
+
+
+  document.getElementById(
+    "ack-state"
+  ).className =
+    "ack blocked";
+}
+
+// ======================================================
+// ACTUATION
+// ======================================================
+
+function showActuation(data) {
+
+  // ----------------------------------------------------
+  // VALID DECISION — NO PHYSICAL ACTION REQUIRED
+  // ----------------------------------------------------
+
+  if (
+    data.command === "NONE"
+  ) {
+
+    // No actuation occurred.
+    // Keep the pipeline at VALIDATE.
+
     activateStep(
       "step-safety"
     );
@@ -384,22 +486,18 @@ function showSafety(result) {
     document.getElementById(
       "ack-state"
     ).textContent =
-      "✗ Command blocked by RescueMesh Safety Policy";
+      "○ No physical action required";
 
 
     document.getElementById(
       "ack-state"
     ).className =
-      "ack blocked";
+      "ack waiting";
+
+
+    return;
   }
-}
 
-
-// ======================================================
-// ACTUATION
-// ======================================================
-
-function showActuation(data) {
 
   // ----------------------------------------------------
   // BLOCKED / NOT EXECUTED
@@ -408,9 +506,6 @@ function showActuation(data) {
   if (
     data.executed === false
   ) {
-
-    // Do NOT activate ACT.
-    // The pipeline stopped during safety validation.
 
     activateStep(
       "step-safety"
@@ -598,4 +693,185 @@ function formatAction(action) {
       "_",
       " "
     );
+}
+
+
+// ======================================================
+// DEMO CONTROL
+// ======================================================
+
+const scenarioButtons =
+  document.querySelectorAll(
+    ".scenario-button"
+  );
+
+
+scenarioButtons.forEach(
+  (button) => {
+
+    button.addEventListener(
+      "click",
+      async () => {
+
+        const scenario =
+          button.dataset.scenario;
+
+        if (!scenario) {
+          return;
+        }
+
+        await runDemoScenario(
+          scenario,
+          button
+        );
+      }
+    );
+  }
+);
+
+
+// ======================================================
+// RUN DEMO SCENARIO
+// ======================================================
+
+async function runDemoScenario(
+  scenario,
+  button
+) {
+
+  const status =
+    document.getElementById(
+      "demo-status"
+    );
+
+
+  // Prevent duplicate requests while a scenario
+  // is already being submitted.
+  setDemoButtonsDisabled(
+    true
+  );
+
+
+  document
+    .querySelectorAll(
+      ".scenario-button"
+    )
+    .forEach(
+      (element) => {
+
+        element.classList.remove(
+          "running"
+        );
+      }
+    );
+
+
+  button.classList.add(
+    "running"
+  );
+
+
+  status.textContent =
+    "RUNNING";
+
+
+  status.className =
+    "demo-status running";
+
+
+  try {
+
+    const response =
+      await fetch(
+        `/api/scenarios/${scenario}`,
+        {
+          method: "POST",
+        }
+      );
+
+
+    if (!response.ok) {
+
+      throw new Error(
+        `HTTP ${response.status}`
+      );
+    }
+
+
+    const result =
+      await response.json();
+
+
+    console.log(
+      "[DEMO] Scenario accepted:",
+      result
+    );
+
+
+    status.textContent =
+      "SCENARIO SENT";
+
+
+    status.className =
+      "demo-status success";
+
+
+  } catch (error) {
+
+    console.error(
+      "[DEMO] Scenario failed:",
+      error
+    );
+
+
+    status.textContent =
+      "ERROR";
+
+
+    status.className =
+      "demo-status error";
+  }
+
+
+  window.setTimeout(
+    () => {
+
+      button.classList.remove(
+        "running"
+      );
+
+
+      status.textContent =
+        "READY";
+
+
+      status.className =
+        "demo-status";
+
+
+      setDemoButtonsDisabled(
+        false
+      );
+
+    },
+    1200
+  );
+}
+
+
+// ======================================================
+// DEMO BUTTON STATE
+// ======================================================
+
+function setDemoButtonsDisabled(
+  disabled
+) {
+
+  scenarioButtons.forEach(
+    (button) => {
+
+      button.disabled =
+        disabled;
+    }
+  );
 }

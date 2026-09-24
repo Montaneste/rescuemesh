@@ -886,35 +886,40 @@ function validateSafetyPolicy(
   // CHECK 4 - AUTOMATIC CONFIDENCE THRESHOLD
   // ----------------------------------------------------
 
-  let confidenceSufficient =
-    true;
+  const physicalActionRequested =
+    decision.action !== "NONE";
 
 
-  if (
-    decision.action !== "NONE"
-  ) {
+  if (physicalActionRequested) {
 
-    confidenceSufficient =
+    const confidenceSufficient =
       confidenceValid &&
-
       decision.confidence >=
         MIN_AUTOMATIC_CONFIDENCE;
-  }
 
 
-  checks.push({
-    name:
-      `Confidence >= ${MIN_AUTOMATIC_CONFIDENCE}`,
+    checks.push({
+      name:
+        `Confidence >= ${MIN_AUTOMATIC_CONFIDENCE}`,
 
-    passed:
-      confidenceSufficient,
-  });
+      passed:
+        confidenceSufficient,
+    });
 
 
-  if (
-    !confidenceSufficient
-  ) {
-    approved = false;
+    if (!confidenceSufficient) {
+      approved = false;
+    }
+
+  } else {
+
+    checks.push({
+      name:
+        "Confidence threshold not required — no physical action",
+
+      passed:
+        true,
+    });
   }
 
 

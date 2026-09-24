@@ -94,6 +94,129 @@
 
 
     <!-- ============================================== -->
+    <!-- DEMO CONTROL -->
+    <!-- ============================================== -->
+
+    <section class="demo-control">
+
+      <div class="demo-control-header">
+
+        <div>
+          <div class="demo-control-title">
+            DEMO CONTROL
+          </div>
+
+          <div class="demo-control-subtitle">
+            Run predefined RescueMesh safety scenarios
+          </div>
+        </div>
+
+        <div
+          id="demo-status"
+          class="demo-status"
+        >
+          READY
+        </div>
+
+      </div>
+
+
+      <div class="demo-scenarios">
+
+        <!-- CRITICAL -->
+
+        <button
+          class="scenario-button critical"
+          data-scenario="critical"
+          type="button"
+        >
+          <span class="scenario-number">01</span>
+
+          <span class="scenario-content">
+            <strong>CRITICAL LEAK</strong>
+            <small>
+              Unoccupied · 97% confidence
+            </small>
+          </span>
+
+          <span class="scenario-result">
+            ACT
+          </span>
+        </button>
+
+
+        <!-- OCCUPIED -->
+
+        <button
+          class="scenario-button safe"
+          data-scenario="occupied"
+          type="button"
+        >
+          <span class="scenario-number">02</span>
+
+          <span class="scenario-content">
+            <strong>OCCUPANT HOME</strong>
+            <small>
+              Leak detected · occupied
+            </small>
+          </span>
+
+          <span class="scenario-result">
+            NO ACTION
+          </span>
+        </button>
+
+
+        <!-- LOW CONFIDENCE -->
+
+        <button
+          class="scenario-button blocked"
+          data-scenario="lowConfidence"
+          type="button"
+        >
+          <span class="scenario-number">03</span>
+
+          <span class="scenario-content">
+            <strong>LOW CONFIDENCE</strong>
+            <small>
+              Critical leak · 42% confidence
+            </small>
+          </span>
+
+          <span class="scenario-result">
+            BLOCK
+          </span>
+        </button>
+
+
+        <!-- NO FLOW -->
+
+        <button
+          class="scenario-button safe"
+          data-scenario="noFlow"
+          type="button"
+        >
+          <span class="scenario-number">04</span>
+
+          <span class="scenario-content">
+            <strong>NO ACTIVE FLOW</strong>
+            <small>
+              Water detected · 0 L/min
+            </small>
+          </span>
+
+          <span class="scenario-result">
+            NO ACTION
+          </span>
+        </button>
+
+      </div>
+
+    </section>
+
+
+
+    <!-- ============================================== -->
     <!-- GRID -->
     <!-- ============================================== -->
 
