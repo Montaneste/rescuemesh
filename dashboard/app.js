@@ -304,6 +304,8 @@ function showIncident(event) {
   // Reset physical-response area whenever
   // a new incident begins.
 
+  currentSafetyApproved = null;
+
   document.getElementById(
     "valve-state"
   ).textContent =
@@ -328,7 +330,7 @@ function showIncident(event) {
 // ======================================================
 
 let currentDecision = null;
-
+let currentSafetyApproved = null;
 
 function showDecision(decision) {
 
@@ -416,6 +418,8 @@ function showDecision(decision) {
 // ======================================================
 
 function showSafety(result) {
+
+  currentSafetyApproved = result.approved;
 
   activateStep(
     "step-safety"
@@ -760,6 +764,19 @@ function showActuation(data) {
 // ======================================================
 
 function showAcknowledgement(data) {
+
+  // Ignore stale ESP32 acknowledgements when the
+  // current scenario did not authorise physical actuation.
+  if (currentSafetyApproved !== true) {
+    console.log(
+      "[DASHBOARD] Ignoring stale ESP32 ACK — no actuation authorised"
+    );
+    return;
+  }
+
+  activateStep(
+    "step-act"
+  );
 
   activateStep(
     "step-act"
