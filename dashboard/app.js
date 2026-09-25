@@ -20,6 +20,8 @@ eventSource.onopen = () => {
   console.log(
     "[DASHBOARD] Connected to RescueMesh Gateway."
   );
+
+  syncDashboardState();
 };
 
 
@@ -55,6 +57,125 @@ eventSource.onmessage = (message) => {
     );
   }
 };
+
+
+// ======================================================
+// STATE SNAPSHOT FALLBACK
+// ======================================================
+
+let lastStateVersion = 0;
+let stateSyncRunning = false;
+
+async function syncDashboardState() {
+
+  // Prevent overlapping requests.
+  if (stateSyncRunning) {
+    return;
+  }
+
+  stateSyncRunning = true;
+
+  try {
+
+    const response = await fetch(
+      "/api/state",
+      {
+        method: "GET",
+        cache: "no-store",
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `HTTP ${response.status}`
+      );
+    }
+
+    const state =
+      await response.json();
+
+    // Nothing new since the previous snapshot.
+    if (
+      Number.isFinite(state.version) &&
+      state.version === lastStateVersion
+    ) {
+      return;
+    }
+
+    lastStateVersion =
+      Number.isFinite(state.version)
+        ? state.version
+        : lastStateVersion;
+
+    console.log(
+      "[DASHBOARD] State snapshot:",
+      state
+    );
+
+    // Reconstruct the pipeline in the same order
+    // as the normal SSE events.
+
+    if (state.incident) {
+      showIncident(
+        state.incident
+      );
+    }
+
+    if (state.decision) {
+      showDecision(
+        state.decision
+      );
+    }
+
+    if (state.safety) {
+      showSafety(
+        state.safety
+      );
+    }
+
+    if (state.actuation) {
+      showActuation(
+        state.actuation
+      );
+    }
+
+    if (state.ack) {
+      showAcknowledgement(
+        state.ack
+      );
+    }
+
+    if (state.error) {
+      showError(
+        state.error
+      );
+    }
+
+  } catch (error) {
+
+    console.warn(
+      "[DASHBOARD] State snapshot unavailable:",
+      error
+    );
+
+  } finally {
+
+    stateSyncRunning = false;
+
+  }
+}
+
+
+// Initial synchronization when the dashboard loads.
+syncDashboardState();
+
+
+// Fallback synchronization.
+// SSE remains the primary real-time transport.
+window.setInterval(
+  syncDashboardState,
+  1000
+);
 
 
 // ======================================================

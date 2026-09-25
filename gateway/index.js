@@ -60,6 +60,28 @@ let currentEvent = null;
 // Connected dashboard SSE clients.
 const dashboardClients = new Set();
 
+// Latest dashboard state.
+// Used by HTTP polling when SSE is unavailable through a proxy/tunnel.
+const dashboardState = {
+  version: 0,
+  updatedAt: null,
+  incident: null,
+  decision: null,
+  safety: null,
+  actuation: null,
+  ack: null,
+  error: null,
+};
+
+function updateDashboardState(type, payload) {
+  if (Object.prototype.hasOwnProperty.call(dashboardState, type)) {
+    dashboardState[type] = payload;
+  }
+
+  dashboardState.version += 1;
+  dashboardState.updatedAt = new Date().toISOString();
+}
+
 
 // ======================================================
 // HTTP / DASHBOARD SERVER
@@ -99,6 +121,17 @@ const server = http.createServer(
         ": RescueMesh dashboard connected\n\n"
       );
 
+      // Keep the SSE connection alive through proxies/tunnels.
+      const heartbeat = setInterval(() => {
+        try {
+          response.write(
+            `: heartbeat ${Date.now()}\n\n`
+          );
+        } catch (error) {
+          clearInterval(heartbeat);
+        }
+      }, 15000);
+
       dashboardClients.add(response);
 
       console.log(
@@ -107,15 +140,44 @@ const server = http.createServer(
 
       request.on("close", () => {
 
+        clearInterval(heartbeat);
+
         dashboardClients.delete(response);
 
         console.log(
           `[DASHBOARD] Client disconnected (${dashboardClients.size})`
         );
+
       });
 
       return;
     }
+
+// --------------------------------------------------
+// DASHBOARD STATE API
+// --------------------------------------------------
+
+if (
+  pathname === "/api/state" &&
+  request.method === "GET"
+) {
+
+  response.writeHead(200, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
+    "Access-Control-Allow-Origin": "*",
+  });
+
+  response.end(
+    JSON.stringify(
+      dashboardState,
+      null,
+      2
+    )
+  );
+
+  return;
+}
 
 
     // --------------------------------------------------
@@ -340,6 +402,9 @@ function broadcast(
   type,
   payload
 ) {
+
+
+  updateDashboardState(type, payload);
 
   const message =
     JSON.stringify({
