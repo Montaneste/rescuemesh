@@ -774,9 +774,6 @@ function showAcknowledgement(data) {
     return;
   }
 
-  activateStep(
-    "step-act"
-  );
 
   activateStep(
     "step-act"

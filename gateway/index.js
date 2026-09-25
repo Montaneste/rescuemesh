@@ -107,10 +107,11 @@ const server = http.createServer(
     if (pathname === "/events") {
 
       response.writeHead(200, {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
         "Connection": "keep-alive",
         "Access-Control-Allow-Origin": "*",
+        "X-Accel-Buffering": "no",
       });
 
       // Force headers to be sent immediately.
