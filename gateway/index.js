@@ -1,3 +1,5 @@
+require("dotenv").config();
+
 const { SerialPort } = require("serialport");
 const { ReadlineParser } = require("@serialport/parser-readline");
 

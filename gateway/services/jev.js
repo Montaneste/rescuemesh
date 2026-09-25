@@ -194,70 +194,164 @@ async function analyzeWithMock(event) {
 
 async function analyzeWithJev(event) {
 
+  console.log("[JEV] Mode: LIVE");
+  console.log("[JEV] Analysing incident...");
+
+  const apiKey = process.env.OPENROUTER_API_KEY;
+
+  if (!apiKey) {
+    throw new Error(
+      "OPENROUTER_API_KEY is not configured."
+    );
+  }
+
+const body = {
+  model: "typesafe/jev-1.13",
+
+  state: {
+    incident_type: event.type,
+    water_detected: event.water_detected,
+    flow_l_min: event.flow,
+    occupancy: event.occupancy,
+  },
+
+  questions: {
+
+    action: {
+      type: "choice",
+
+      instructions:
+        "Which water safety action is appropriate for this incident?",
+
+      criteria: {
+        VALVE_CLOSE:
+          "Close the water valve when there is a credible active water leak requiring immediate isolation.",
+
+        VALVE_OPEN:
+          "Open the water valve only when the incident clearly indicates that restoring water flow is appropriate.",
+
+        NONE:
+          "Take no valve action when there is insufficient evidence that physical intervention is required."
+      }
+    },
+
+    severity: {
+      type: "choice",
+
+      instructions:
+        "What is the severity of this water incident?",
+
+      criteria: {
+        low:
+          "No significant immediate risk.",
+
+        medium:
+          "Potential problem requiring attention but no immediate serious damage expected.",
+
+        high:
+          "Significant active incident with substantial risk of property damage.",
+
+        critical:
+          "Active incident requiring immediate intervention to prevent or limit serious property damage."
+      }
+    },
+
+    intervention: {
+      type: "noul",
+
+      instructions:
+        "Should this incident trigger an automatic safety intervention?",
+
+      criteria: {
+        true:
+          "The evidence supports immediate automatic intervention.",
+
+        false:
+          "The evidence does not justify automatic intervention."
+      }
+    }
+  }
+};
+
+  const response = await fetch(
+    "https://openrouter.ai/api/alpha/decisions",
+    {
+      method: "POST",
+
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+
+      body: JSON.stringify(body),
+    }
+  );
+
+  if (!response.ok) {
+
+    const errorText =
+      await response.text();
+
+    throw new Error(
+      `Jev API error ${response.status}: ${errorText}`
+    );
+  }
+
+  const data = await response.json();
+
   console.log(
-    "[JEV] Mode: LIVE"
+    "[JEV] Real response:",
+    JSON.stringify(data, null, 2)
   );
 
-  console.log(
-    "[JEV] Analysing incident..."
-  );
+  const actionAnswer =
+    data.answers?.action;
 
+  const severityAnswer =
+    data.answers?.severity;
 
-  /*
-   * LIVE INTEGRATION BOUNDARY
-   *
-   * Do not implement the transport until the official
-   * Jev API / SDK contract is available.
-   *
-   * Expected conceptual flow:
-   *
-   * RescueMesh incident
-   *        ↓
-   * Build Jev request
-   *        ↓
-   * Authenticate
-   *        ↓
-   * Send incident context
-   *        ↓
-   * Jev reasoning
-   *        ↓
-   * Receive structured response
-   *        ↓
-   * Map response to Decision Contract
-   *        ↓
-   * RescueMesh Safety Policy
-   *
-   *
-   * Required normalized output:
-   *
-   * {
-   *   action:
-   *     "VALVE_CLOSE" |
-   *     "VALVE_OPEN" |
-   *     "NONE",
-   *
-   *   severity:
-   *     "low" |
-   *     "medium" |
-   *     "high" |
-   *     "critical",
-   *
-   *   confidence: 0.0 - 1.0,
-   *
-   *   reason:
-   *     "Human-readable explanation",
-   *
-   *   requires_confirmation:
-   *     true | false
-   * }
-   */
+  const interventionAnswer =
+    data.answers?.intervention;
 
-  void event;
+  if (
+    !actionAnswer ||
+    !severityAnswer
+  ) {
+    throw new Error(
+      "Invalid Jev response: required answers missing."
+    );
+  }
 
-  throw new Error(
-    "Jev live integration is not configured. " +
-    "Official API/SDK access is required."
-  );
+  const action =
+    actionAnswer.choice;
+
+  const severity =
+    severityAnswer.choice;
+
+  const confidence =
+    Number(actionAnswer.confidence);
+
+  const interventionProbability =
+    Number(interventionAnswer?.noul);
+
+  return {
+
+    action,
+
+    severity,
+
+    confidence,
+
+    reason:
+      `Jev selected ${action} for a ${severity} incident` +
+      (
+        Number.isFinite(interventionProbability)
+          ? ` with intervention probability ${interventionProbability.toFixed(2)}.`
+          : "."
+      ),
+
+    requires_confirmation: false,
+  };
 }
 
 
