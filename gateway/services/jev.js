@@ -10,8 +10,9 @@
 //   mock -> local simulated AI decision
 //   live -> real Jev integration
 //
-// Until Jev credentials and API documentation are
-// available, RescueMesh operates in MOCK mode.
+// RescueMesh always expects the same normalized
+// Decision Contract, regardless of the Jev transport
+// or API implementation.
 // ======================================================
 
 
@@ -20,7 +21,27 @@
 // ======================================================
 
 const MODE =
-  process.env.JEV_MODE || "mock";
+  (process.env.JEV_MODE || "mock")
+    .trim()
+    .toLowerCase();
+
+
+// ======================================================
+// DECISION CONTRACT
+// ======================================================
+
+const ALLOWED_ACTIONS = [
+  "VALVE_CLOSE",
+  "VALVE_OPEN",
+  "NONE",
+];
+
+const ALLOWED_SEVERITIES = [
+  "low",
+  "medium",
+  "high",
+  "critical",
+];
 
 
 // ======================================================
@@ -29,18 +50,77 @@ const MODE =
 
 async function analyzeIncident(event) {
 
+  validateIncident(event);
+
   switch (MODE) {
 
     case "mock":
-      return analyzeWithMock(event);
+      return normalizeDecision(
+        await analyzeWithMock(event),
+        "jev-mock"
+      );
 
     case "live":
-      return analyzeWithJev(event);
+      return normalizeDecision(
+        await analyzeWithJev(event),
+        "jev"
+      );
 
     default:
       throw new Error(
         `Invalid JEV_MODE: ${MODE}`
       );
+  }
+}
+
+
+// ======================================================
+// INCIDENT VALIDATION
+// ======================================================
+
+function validateIncident(event) {
+
+  if (
+    !event ||
+    typeof event !== "object" ||
+    Array.isArray(event)
+  ) {
+    throw new Error(
+      "Invalid incident: expected an object."
+    );
+  }
+
+  if (event.type !== "leak") {
+    throw new Error(
+      `Unsupported incident type: ${event.type}`
+    );
+  }
+
+  if (
+    typeof event.water_detected !== "boolean"
+  ) {
+    throw new Error(
+      "Invalid incident: water_detected must be boolean."
+    );
+  }
+
+  if (
+    typeof event.flow !== "number" ||
+    !Number.isFinite(event.flow) ||
+    event.flow < 0
+  ) {
+    throw new Error(
+      "Invalid incident: flow must be a non-negative number."
+    );
+  }
+
+  if (
+    typeof event.occupancy !== "string" ||
+    event.occupancy.length === 0
+  ) {
+    throw new Error(
+      "Invalid incident: occupancy is required."
+    );
   }
 }
 
@@ -83,8 +163,6 @@ async function analyzeWithMock(event) {
 
       requires_confirmation: false,
 
-      source: "jev-mock",
-
     };
   }
 
@@ -106,8 +184,6 @@ async function analyzeWithMock(event) {
 
     requires_confirmation: false,
 
-    source: "jev-mock",
-
   };
 }
 
@@ -118,13 +194,22 @@ async function analyzeWithMock(event) {
 
 async function analyzeWithJev(event) {
 
+  console.log(
+    "[JEV] Mode: LIVE"
+  );
+
+  console.log(
+    "[JEV] Analysing incident..."
+  );
+
+
   /*
-   * REAL JEV INTEGRATION
+   * LIVE INTEGRATION BOUNDARY
    *
-   * To be implemented when Jev access and official
-   * documentation are provided.
+   * Do not implement the transport until the official
+   * Jev API / SDK contract is available.
    *
-   * Expected flow:
+   * Expected conceptual flow:
    *
    * RescueMesh incident
    *        ↓
@@ -136,42 +221,138 @@ async function analyzeWithJev(event) {
    *        ↓
    * Jev reasoning
    *        ↓
-   * Structured response
+   * Receive structured response
    *        ↓
-   * Normalize response
+   * Map response to Decision Contract
    *        ↓
-   * RescueMesh Safety Layer
+   * RescueMesh Safety Policy
    *
    *
-   * Expected RescueMesh Decision Contract:
+   * Required normalized output:
    *
    * {
-   *   action: "VALVE_CLOSE" | "VALVE_OPEN" | "NONE",
-   *   severity: "low" | "medium" | "high" | "critical",
+   *   action:
+   *     "VALVE_CLOSE" |
+   *     "VALVE_OPEN" |
+   *     "NONE",
+   *
+   *   severity:
+   *     "low" |
+   *     "medium" |
+   *     "high" |
+   *     "critical",
+   *
    *   confidence: 0.0 - 1.0,
-   *   reason: "Human-readable explanation",
-   *   requires_confirmation: true | false,
-   *   source: "jev"
+   *
+   *   reason:
+   *     "Human-readable explanation",
+   *
+   *   requires_confirmation:
+   *     true | false
    * }
    */
 
-  console.log(
-    "[JEV] Mode: LIVE"
-  );
-
-  console.log(
-    "[JEV] Analysing incident..."
-  );
-
-
-  // Prevent unused parameter warnings while the
-  // integration is not implemented.
   void event;
 
-
   throw new Error(
-    "Jev live integration is not configured yet."
+    "Jev live integration is not configured. " +
+    "Official API/SDK access is required."
   );
+}
+
+
+// ======================================================
+// NORMALIZE / VALIDATE JEV DECISION
+// ======================================================
+
+function normalizeDecision(
+  decision,
+  source
+) {
+
+  if (
+    !decision ||
+    typeof decision !== "object" ||
+    Array.isArray(decision)
+  ) {
+    throw new Error(
+      "Invalid Jev response: expected an object."
+    );
+  }
+
+
+  const normalized = {
+
+    action:
+      String(decision.action || "")
+        .trim()
+        .toUpperCase(),
+
+    severity:
+      String(decision.severity || "")
+        .trim()
+        .toLowerCase(),
+
+    confidence:
+      Number(decision.confidence),
+
+    reason:
+      String(decision.reason || "")
+        .trim(),
+
+    requires_confirmation:
+      decision.requires_confirmation === true,
+
+    source,
+
+  };
+
+
+  if (
+    !ALLOWED_ACTIONS.includes(
+      normalized.action
+    )
+  ) {
+    throw new Error(
+      `Invalid Jev action: ${normalized.action}`
+    );
+  }
+
+
+  if (
+    !ALLOWED_SEVERITIES.includes(
+      normalized.severity
+    )
+  ) {
+    throw new Error(
+      `Invalid Jev severity: ${normalized.severity}`
+    );
+  }
+
+
+  if (
+    !Number.isFinite(
+      normalized.confidence
+    ) ||
+    normalized.confidence < 0 ||
+    normalized.confidence > 1
+  ) {
+    throw new Error(
+      "Invalid Jev confidence value."
+    );
+  }
+
+
+  if (
+    normalized.reason.length === 0
+  ) {
+    throw new Error(
+      "Invalid Jev response: reason is required."
+    );
+  }
+
+
+  return normalized;
 }
 
 
