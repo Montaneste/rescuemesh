@@ -8,6 +8,12 @@ The current prototype demonstrates autonomous water-leak mitigation using an ESP
 
 ---
 
+## System Architecture
+
+![RescueMesh Architecture](docs/rescuemesh-architecture.png)
+
+---
+
 ## The Problem
 
 Infrastructure incidents such as water leaks require fast decisions.
